@@ -1,4 +1,5 @@
 from utils import *
+import tensorflow as tf
 #keras stuff
 import keras
 from keras.models import *
@@ -38,15 +39,29 @@ class Portfolio():
         model_output = Activation('softmax')(x)
 
         # Inputs and output to create the ensemble
-        model = Model([main_input, weight_input, bias_input], model_output)
-        model.summary()
+        self.model = Model([main_input, weight_input, bias_input], model_output)
+
+        # Creating the custom symbolbolic gradiant
+        mu = K.placeholder(shape=(None, 1), name='mu')
+        y = K.placeholder(shape=(None, len(self.coins)), name='y')
+
+        sqOut = K.squeeze(K.squeeze(self.model.output, 1), 1)
+        yOutMult = tf.multiply(sqOut, y)
+        yOutBatchDot = tf.reduce_sum(yOutMult, axis=1, keep_dims=True)
+        muDotMult = tf.multiply(mu, yOutBatchDot)
+
+        loss = -K.log(muDotMult)
+
+        grad = K.gradients(loss, self.model.trainable_weights)
+        self.compute_gradient = K.function(inputs=[main_input, weight_input, bias_input, mu, y, self.model.output], outputs=grad)
+        self.model.summary()
         return
 
 
 if __name__ == "__main__":
     #load saved data
     x, y, rates = load_data()
-    #init params for portfolio
+    # init params for portfolio
     coins = ['EOS/BTC', 'ETH/BTC', 'ETC/BTC', 'TRX/BTC', 'ICX/BTC', 'XRP/BTC', 'XLM/BTC', 'NEO/BTC', 'LTC/BTC', 'ADA/BTC']
     initial_weights = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     p_beta = 0.00005
@@ -57,4 +72,4 @@ if __name__ == "__main__":
     epochs = 50
 
     portfolio = Portfolio(coins, initial_weights, p_beta, k, learning_rate, mini_batch_count, mini_batch_size, epochs)
-    portfolio.create_eiie(x.shape[1:], rates.shape[1:])
+    portfolio.create_eiie(np.array(x).shape[1:], np.array(y).shape[1:])
