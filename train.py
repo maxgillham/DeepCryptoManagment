@@ -10,12 +10,14 @@ class Portfolio():
     def __init__(self, coins, weights, p_beta, k, learning_rate, mini_batch_count, mini_batch_size, epochs):
         self.coins = coins
         self.weights = weights
+        self.value = 1.0
         self.p_beta = p_beta
         self.k = k
         self.learning_rate = learning_rate
         self.mini_batch_size = mini_batch_size
         self.mini_batch_count = mini_batch_count
         self.epochs = epochs
+        self.pvm = []
 
     def create_eiie(self, input_tensor_shape, rates_shape):
         K.set_image_data_format("channels_first")
@@ -45,25 +47,48 @@ class Portfolio():
         mu = K.placeholder(shape=(None, 1), name='mu')
         y = K.placeholder(shape=(None, len(self.coins)), name='y')
 
-        sqOut = K.squeeze(K.squeeze(self.model.output, 1), 1)
-        yOutMult = tf.multiply(sqOut, y)
-        yOutBatchDot = tf.reduce_sum(yOutMult, axis=1, keep_dims=True)
-        muDotMult = tf.multiply(mu, yOutBatchDot)
+        mod_out = K.squeeze(K.squeeze(self.model.output, 1), 1)
 
-        loss = -K.log(muDotMult)
+        out_sq = tf.multiply(mod_out, y)
+        out_batch_dot = tf.reduce_sum(out_sq, axis=1, keep_dims=True)
+        output = tf.multiply(mu, out_batch_dot)
+
+        loss = -K.log(output)
 
         grad = K.gradients(loss, self.model.trainable_weights)
         self.compute_gradient = K.function(inputs=[main_input, weight_input, bias_input, mu, y, self.model.output], outputs=grad)
         self.model.summary()
         return
 
+    def train(x, rates):
+        # Init portfolio vector memory
+        # Initilized to be a list of length 19899, where entries are equal to
+        # [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].  As a np array has shape (19899, 11)
+        self.pvm = [[1.] + [0.]*(len(self.coins)-1)]*(len(rates)*2 - 1)
+        # Iterate through epochs
+        for epoch in range(self.epochs):
+            # Reset weight vector
+            self.weights  = [1.] + [0.]*len(self.coins[1:])
+            # Reset portfolio value
+            self.value = 1.0
+            # Iterate through trading period
+            for i, (rates_, pvm_, x_) in enumerate(zip(rates[1:], self.pvm[1:-1], x[1:])):
+                # Maybe turn into np array earlier for these?
+                main_input = np.array([x_])
+                wight_input = np.array([pvm_[1:]])
+                bias_input = np.array([1.])
+                # Get model prediction
+                model_output = self.model.predict([main_input, weight_input, bias_input])[0]
+                # Overwrite pvm for next time period step with model output
+                self.pvm[i+2]
+
 
 if __name__ == "__main__":
     #load saved data
     x, y, rates = load_data()
     # init params for portfolio
-    coins = ['EOS/BTC', 'ETH/BTC', 'ETC/BTC', 'TRX/BTC', 'ICX/BTC', 'XRP/BTC', 'XLM/BTC', 'NEO/BTC', 'LTC/BTC', 'ADA/BTC']
-    initial_weights = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    coins = ['BTC/BTC', 'EOS/BTC', 'ETH/BTC', 'ETC/BTC', 'TRX/BTC', 'ICX/BTC', 'XRP/BTC', 'XLM/BTC', 'NEO/BTC', 'LTC/BTC', 'ADA/BTC']
+    initial_weights = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     p_beta = 0.00005
     k = 15
     learning_rate = 0.00019
@@ -73,3 +98,4 @@ if __name__ == "__main__":
 
     portfolio = Portfolio(coins, initial_weights, p_beta, k, learning_rate, mini_batch_count, mini_batch_size, epochs)
     portfolio.create_eiie(np.array(x).shape[1:], np.array(y).shape[1:])
+    portfolio.train(x, rates)
